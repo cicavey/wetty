@@ -1,4 +1,5 @@
 var express = require('express');
+var extend = require('extend');
 var http = require('http');
 var https = require('https');
 var path = require('path');
@@ -95,6 +96,27 @@ var wss = new ws({
 });
 
 wss.on('request', function(request) {
+
+	var loginOpts = [];
+	var cenv = {};
+
+	// Check for client-ssl
+	var req = request.httpRequest;
+	if(req.headers && req.headers.verified == 'SUCCESS' && req.headers.dn) {
+		var dnObj = {};
+		req.headers.dn.split('/').filter(function(v){
+			return v.trim().length > 0;
+		}).forEach(function(v){
+			var pair = v.split('=');
+			dnObj[pair[0].trim()] = pair[1].trim();
+		});
+		if(dnObj.CN) {
+			cenv.SSL_USER = dnObj.CN;
+			loginOpts.push('-p');
+			loginOpts.push(dnObj.CN);
+		}
+	}
+
     var term;
     var sshuser = '';
     var conn = request.accept('wetty', request.origin);
@@ -112,16 +134,18 @@ wss.on('request', function(request) {
         var data = JSON.parse(msg.utf8Data);
         if (!term) {
             if (process.getuid() == 0) {
-                term = pty.spawn('/bin/login', [], {
+                term = pty.spawn('/bin/login', loginOpts, {
                     name: 'xterm-256color',
                     cols: 80,
-                    rows: 30
+                    rows: 30,
+                    env: cenv
                 });
             } else {
-                term = pty.spawn('ssh', [sshuser + sshhost, '-p', sshport, '-o', 'PreferredAuthentications=' + sshauth], {
+                term = pty.spawn('ssh', [sshuser + sshhost, '-p', sshport, '-o', 'PreferredAuthentications=' + sshauth, '-o', 'SendEnv=SSL_USER'], {
                     name: 'xterm-256color',
                     cols: 80,
-                    rows: 30
+                    rows: 30,
+                    env: cenv
                 });
             }
             console.log((new Date()) + " PID=" + term.pid + " STARTED on behalf of user=" + sshuser)
